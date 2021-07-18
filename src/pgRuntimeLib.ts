@@ -267,7 +267,7 @@ export function fillFieldMulti<T extends any>(o: any, fieldName: string, v0: T):
 /**
  *
  */
-export function pgConv(v: any, convName: string) {
+export function pgParserConv(v: any, convName: string) {
     switch (convName) {
         case "String":
             return v.substr(1, v.length - 2);
@@ -280,6 +280,35 @@ export function pgConv(v: any, convName: string) {
         case "Identifier":
             return v;
         case "Space":
+            return v;
+    }
+    return v;
+}
+
+/**
+ *
+ */
+export function pgConv(v: any, convName: string) {
+    return pgParserConv(v, convName);
+}
+
+/**
+ *
+ */
+export function pgGeneratorConv(v: any, convName: string) {
+    switch (convName) {
+        case "String":
+            return `"${v.replaceAll('"', '\\"').replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll("\n", "\\n")}"`;
+        case "Float":
+            return `${v}`;
+        case "Int":
+            return `${v}`;
+        case "Comment":
+            return `/*${v}*/`;
+        case "Identifier":
+            return v;
+        case "Space":
+            if (!v || !v.length) return " ";
             return v;
     }
     return v;
@@ -482,7 +511,11 @@ export function isGenResultItemLink(v: any): v is GenResultItemLink {
     return !!v.linkto;
 }
 
-export type GenResultItem<TParamKey extends string = string> = string | [TParamKey] | { linkto: string; [key: string]: string };
+export type GenResultItemConv = string;
+export type GenResultItem<TParamKey extends string = string> =
+    | string
+    | ([TParamKey] | [TParamKey, string])
+    | { linkto: string; [key: string]: string };
 
 /**
  * GenResult - содержит в items массив из трех видов элементов
