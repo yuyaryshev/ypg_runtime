@@ -567,3 +567,94 @@ export function linkGenResult(genResult: GenResult, lookup: GenResultLookupFunc,
     linkGenResultRecursive(genResult, context, params);
     return context.s;
 }
+
+//****************************//
+//      Generator Staff       //
+//****************************//
+
+export type ID = string | number;
+export type Link = {
+    to: ID;
+    [key: string]: string | number;
+};
+
+export type Indent = {
+    indent: number;
+};
+export type Node = {
+    id: ID;
+    items: Array<string | string[] | Link | Indent>;
+};
+
+export type Leaf = {
+    [key: string]: string | number | string[] | Leaf | Leaf[];
+};
+
+export type Writer = {
+    id: ID;
+    leaf: Leaf;
+};
+
+export type Store = Map<ID, Node>;
+export type Handlers = {
+    [key: string]: (writer: Writer) => Node;
+};
+
+export function generate(target: Leaf, handlers: Handlers, store = new Map<ID, Node>()): Store {
+    for (const [key, value] of Object.entries(target)) {
+        if (key === "id") {
+            if (target.t && typeof target.t === "string" && (typeof value === "string" || typeof value === "number")) {
+                store.set(value, handlers[target.t]({ id: value, leaf: target }));
+            }
+        }
+        if (Array.isArray(value)) {
+            for (const leaf of value) {
+                if (typeof leaf !== "string") {
+                    store = generate(leaf, handlers, store);
+                }
+            }
+        }
+        if (typeof value === "object" && !Array.isArray(value)) {
+            store = generate(value, handlers, store);
+        }
+    }
+
+    return store;
+}
+
+export function clear(target: Leaf, keys: string[] = []) {
+    const cleaned = {} as Leaf;
+    for (const [key, value] of Object.entries<unknown>(target)) {
+        if (!keys.includes(key)) {
+            if (Array.isArray(value) && typeof value[0] !== "string") {
+                cleaned[key] = value.map((item) => clear(item, keys));
+            } else if (value && typeof value === "object" && value.toString() === "[object Object]") {
+                cleaned[key] = clear(value as Leaf, keys);
+            } else if (Array.isArray(value) && typeof value[0] === "string") {
+                cleaned[key] = value;
+            } else if (typeof value === "string" || typeof value === "number") {
+                cleaned[key] = value;
+            }
+        }
+    }
+
+    return cleaned;
+}
+
+export function createLink(item: Leaf) {
+    const link = {} as Link;
+    for (const [key, value] of Object.entries<any>(item)) {
+        if (typeof value === "string" || typeof value === "number") {
+            if (key === "t") {
+                continue;
+            }
+            if (key === "id") {
+                link.to = value;
+                continue;
+            }
+            link[key] = value;
+        }
+    }
+
+    return link;
+}
