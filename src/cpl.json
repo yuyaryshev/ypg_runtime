@@ -2,16 +2,6 @@
     {
         "cpl": 369,
         "filePath": "src/pgRuntimeLib.ts",
-        "pos": 15700
-    },
-    {
-        "cpl": 2,
-        "filePath": "src/pgRuntimeLib.ts",
-        "pos": 15835
-    },
-    {
-        "cpl": 1,
-        "filePath": "src/pgRuntimeLib.ts",
-        "pos": 18931
+        "pos": 20232
     }
 ]

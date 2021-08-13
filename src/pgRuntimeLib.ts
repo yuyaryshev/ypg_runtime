@@ -538,40 +538,6 @@ export interface GenResultLinkerContext {
     compileLink?: (path: string, context: GenResultLinkerContext, params?: any | undefined) => void;
 }
 
-export function linkGenResultRecursive(genResult: GenResult, context: GenResultLinkerContext, params?: any | undefined) {
-    for (const item of genResult.items) {
-        if (isGenResultItemString(item)) {
-            context.s += item;
-        } else if (isGenResultItemParam(item)) {
-            context.s += params?.[item[0]];
-        } else if (isGenResultItemLink(item)) {
-            if (context.compileLink) {
-                context.compileLink(item.linkto, context, item);
-            } else if (context.lookup) {
-                const subGenResult = context.lookup(item.linkto);
-                linkGenResultRecursive(subGenResult, context, item);
-            } else {
-                throw new Error(`CODE00000002 Eather lookup or compileLink funciton should be specified!`);
-            }
-        } else {
-            const e = new Error(`CODE00000001 Invalid GenResultItem`);
-            (e as any).genResult = genResult;
-            (e as any).item = item;
-            throw e;
-        }
-    }
-}
-
-export function linkGenResult(genResult: GenResult, lookup: GenResultLookupFunc, params?: any | undefined): string {
-    const context = { s: "", lookup };
-    linkGenResultRecursive(genResult, context, params);
-    return context.s;
-}
-
-//****************************//
-//      Generator Staff       //
-//****************************//
-
 export type ID = string | number;
 export type Link = {
     to: ID;
@@ -599,6 +565,101 @@ export type Store = Map<ID, Node>;
 export type Handlers = {
     [key: string]: (writer: Writer) => Node;
 };
+
+export type Context = {
+    string: string;
+    lookup: (id: ID) => Node | undefined;
+};
+
+const quote = ["'", '"', "`"];
+const pairStart = ["(", "[", "{"];
+const pairEnd = [")", "]", "}"];
+const whitespace = [" ", "\n", "\t", "\r"];
+const special = ["+", "-", "*", "/", "|"];
+const comma = ",";
+
+const isIdValid = (c: string) => ("a" <= c && c <= "z") || ("A" <= c && c <= "Z") || ("0" <= c && c <= "9") || c === "_";
+
+const charIs = (char: string) =>
+    (whitespace.includes(char) && "W") ||
+    (quote.includes(char) && "Q") ||
+    (pairStart.includes(char) && "PS") ||
+    (pairEnd.includes(char) && "PE") ||
+    (special.includes(char) && "L") ||
+    (isIdValid(char) && "I") ||
+    "S";
+
+const space = ["I-I", "Q-Q", "P-P", "PS-PE", "Q-I", "I-Q", "PS-Q", "Q-PE"];
+
+function beautify(context: Context, item: string) {
+    if (context.string === undefined) {
+        context.string = "";
+    }
+
+    const res = item + "";
+    const after = charIs(context.string[context.string.length - 1]);
+    const before = charIs(res[0]);
+
+    const sequence = `${before}-${after}`;
+
+    if (space.includes(sequence)) {
+        context.string += " ";
+    }
+
+    return (context.string += res);
+}
+
+const isLink = (target: any): target is Link => !!target.to;
+
+const isIndent = (target: any): target is Indent => !!target.indent;
+
+export function compose(ast: Leaf, generator: Handlers) {
+    const cleaned = clear(ast, ["raw", "tokens"]);
+    const generated = generate(cleaned, generator);
+    const node = generated.get(1);
+
+    if (node) {
+        const linked = link(
+            node,
+            {
+                string: "",
+                lookup: (id) => generated.get(id),
+            },
+            { to: 0 },
+        );
+
+        return linked.string;
+    } else {
+        throw new ReferenceError(`Generated collection got no roots`);
+    }
+}
+
+export function link(node: Node, context: Context, parent: Link) {
+    let indent = 0;
+
+    for (const item of node.items) {
+        if (typeof item === "string") {
+            beautify(context, item);
+        } else if (Array.isArray(item) && item.length) {
+            beautify(context, parent[item[0]] + "");
+        } else if (typeof item === "object" && !Array.isArray(item)) {
+            if (isIndent(item) && item.indent > 0) {
+                indent = item.indent;
+            }
+            if (isLink(item)) {
+                const next = context.lookup(item.to);
+                context.string += " ".repeat(indent);
+                if (next) {
+                    context = link(next, context, item);
+                } else {
+                    throw new ReferenceError(`Bad link: ${item.to}`);
+                }
+            }
+        }
+    }
+
+    return context;
+}
 
 export function generate(target: Leaf, handlers: Handlers, store = new Map<ID, Node>()): Store {
     for (const [key, value] of Object.entries(target)) {
