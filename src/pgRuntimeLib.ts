@@ -566,9 +566,21 @@ export type Handlers = {
     [key: string]: (writer: Writer) => Node;
 };
 
+export type Converters = "String" | "Int" | "Float" | "Indentifier";
+
 export type Context = {
     string: string;
     lookup: (id: ID) => Node | undefined;
+    converted: {
+        [key: string]: Converters;
+    };
+    beautifySequence?: BeautyRule[];
+};
+
+export type ComposeOptions = {
+    exclude?: string[];
+    converters?: Context["converted"];
+    beautifySequence?: BeautyRule[];
 };
 
 const quote = ["'", '"', "`"];
@@ -589,9 +601,13 @@ const charIs = (char: string) =>
     (isIdValid(char) && "I") ||
     "S";
 
-const space = ["I-I", "Q-Q", "P-P", "PS-PE", "Q-I", "I-Q", "PS-Q", "Q-PE"];
+export type BeautyLabel = "W" | "Q" | "PS" | "PE" | "L" | "I" | "S";
+export type BeautyRule = `${BeautyLabel}-${BeautyLabel}`;
+
+const defaultBeautifySequence: BeautyRule[] = ["I-I", "Q-Q", "PS-PE", "Q-I", "I-Q", "PS-Q", "Q-PE"];
 
 function beautify(context: Context, item: string) {
+    const bs = context.beautifySequence || defaultBeautifySequence;
     if (context.string === undefined) {
         context.string = "";
     }
@@ -600,9 +616,9 @@ function beautify(context: Context, item: string) {
     const after = charIs(context.string[context.string.length - 1]);
     const before = charIs(res[0]);
 
-    const sequence = `${before}-${after}`;
+    const sequence = `${before}-${after}` as BeautyRule;
 
-    if (space.includes(sequence)) {
+    if (bs.includes(sequence)) {
         context.string += " ";
     }
 
@@ -613,8 +629,8 @@ const isLink = (target: any): target is Link => !!target.to;
 
 const isIndent = (target: any): target is Indent => !!target.indent;
 
-export function compose(ast: Leaf, generator: Handlers) {
-    const cleaned = clear(ast, ["raw", "tokens"]);
+export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions) {
+    const cleaned = clear(ast, options?.exclude || ["raw", "tokens"]);
     const generated = generate(cleaned, generator);
     const node = generated.get(1);
 
@@ -624,15 +640,27 @@ export function compose(ast: Leaf, generator: Handlers) {
             {
                 string: "",
                 lookup: (id) => generated.get(id),
+                converted: options?.converters || {
+                    string: "String",
+                    number: "Float",
+                },
+                beautifySequence: options?.beautifySequence || defaultBeautifySequence,
             },
             { to: 0 },
         );
 
-        return linked.string;
+        return {
+            text: linked.string,
+            store: generated,
+        };
     } else {
         throw new ReferenceError(`Generated collection got no roots`);
     }
 }
+
+const converters: { [key: string]: Function } = {
+    String: (item: string) => `"${item}"`,
+};
 
 export function link(node: Node, context: Context, parent: Link) {
     let indent = 0;
@@ -641,7 +669,13 @@ export function link(node: Node, context: Context, parent: Link) {
         if (typeof item === "string") {
             beautify(context, item);
         } else if (Array.isArray(item) && item.length) {
-            beautify(context, parent[item[0]] + "");
+            const converter = context.converted[item[1]];
+            if (converter) {
+                const converted = converters[converter](parent[item[0]]);
+                beautify(context, converted);
+            } else {
+                beautify(context, parent[item[0]] + "");
+            }
         } else if (typeof item === "object" && !Array.isArray(item)) {
             if (isIndent(item) && item.indent > 0) {
                 indent = item.indent;
