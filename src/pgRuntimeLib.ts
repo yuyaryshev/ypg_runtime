@@ -566,6 +566,10 @@ export type Handlers = {
     [key: string]: (writer: Writer) => Node;
 };
 
+export type Enum = {
+    [key: string]: string[];
+};
+
 export type Converters = "String" | "Int" | "Float" | "Indentifier";
 
 export type Context = {
@@ -632,7 +636,7 @@ const isIndent = (target: any): target is Indent => !!target.indent;
 export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions) {
     const cleaned = clear(ast, options?.exclude || ["raw", "tokens"]);
     const generated = generate(cleaned, generator);
-    const node = generated.get(1);
+    const node = generated.values().next().value;
 
     if (node) {
         const linked = link(
@@ -658,8 +662,11 @@ export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions
     }
 }
 
-const converters: { [key: string]: Function } = {
+export const converters: { [key: string]: Function } = {
     String: (item: string) => `"${item}"`,
+    Identifier: (item: string) => item,
+    Float: (item: string) => parseFloat(item),
+    Int: (item: string) => parseInt(item, 10),
 };
 
 export function link(node: Node, context: Context, parent: Link) {
@@ -669,10 +676,12 @@ export function link(node: Node, context: Context, parent: Link) {
         if (typeof item === "string") {
             beautify(context, item);
         } else if (Array.isArray(item) && item.length) {
-            const converter = context.converted[item[1]];
+            let converter = converters[item[1]];
+            if (!converter) {
+                converter = converters[context.converted[item[1]]];
+            }
             if (converter) {
-                const converted = converters[converter](parent[item[0]]);
-                beautify(context, converted);
+                beautify(context, converter(parent[item[0]]));
             } else {
                 beautify(context, parent[item[0]] + "");
             }
@@ -686,7 +695,11 @@ export function link(node: Node, context: Context, parent: Link) {
                 if (next) {
                     context = link(next, context, item);
                 } else {
-                    throw new ReferenceError(`Bad link: ${item.to}`);
+                    if (item.v) {
+                        beautify(context, item.v + "");
+                    } else {
+                        throw new ReferenceError(`Bad link: ${item.to}`);
+                    }
                 }
             }
         }
@@ -699,7 +712,12 @@ export function generate(target: Leaf, handlers: Handlers, store = new Map<ID, N
     for (const [key, value] of Object.entries(target)) {
         if (key === "id") {
             if (target.t && typeof target.t === "string" && (typeof value === "string" || typeof value === "number")) {
-                store.set(value, handlers[target.t]({ id: value, leaf: target }));
+                const handler = handlers[target.t];
+                if (handler) {
+                    store.set(value, handler({ id: value, leaf: target }));
+                } else {
+                    console.log(target.t);
+                }
             }
         }
         if (Array.isArray(value)) {
@@ -753,3 +771,84 @@ export function createLink(item: Leaf) {
 
     return link;
 }
+
+export function isLeaf(item: any): item is Leaf {
+    return !!(typeof item === "object" && !Array.isArray(item));
+}
+
+export function isString(item: any): item is string {
+    return typeof item === "string";
+}
+
+export function isNumber(item: any): item is number {
+    return typeof item === "number";
+}
+
+export function isBoolean(item: any): item is boolean {
+    return typeof item === "boolean";
+}
+
+export function isPrimitive(item: any): item is string | number | boolean {
+    return !(isString(item) || isNumber(item) || isBoolean(item));
+}
+
+export type GeneratorContext = {
+    writer: Writer;
+    input: Leaf;
+    output: Node["items"];
+    generator: Handlers;
+};
+
+export const GEN = {
+    enumSwitch(flag: string, e: Enum, { output }: GeneratorContext) {
+        output.push(e[flag][0]);
+    },
+
+    typeSwitch(item: any, field: string, choice: string[], { writer, input, output, generator }: GeneratorContext) {
+        if (item) {
+            const type = item.t;
+            if (isString(type) && choice.includes(type)) {
+                output.push(createLink(item));
+            } else if (isString(input.t)) {
+                output.push([field, input.t]);
+            }
+        } else {
+            const type = input.t;
+            if (isString(type) && choice.includes(type)) {
+                return generator[type](writer);
+            }
+        }
+    },
+
+    plusField(field: string | undefined, { input, output }: GeneratorContext, callback: (item: Leaf) => void, seporator?: () => void) {
+        if (field) {
+            const items = input[field];
+            if (Array.isArray(items) && items.length) {
+                for (const [i, item] of items.entries()) {
+                    if (isLeaf(item)) {
+                        callback(item);
+                    } else {
+                        output.push(item);
+                    }
+                    if (seporator && items.length > 1 && i < items.length - 1) {
+                        seporator();
+                    }
+                }
+            }
+        }
+    },
+
+    reference(item: any, field: string, converter: string, { input, output }: GeneratorContext) {
+        if (item) {
+            if (isLeaf(item)) {
+                output.push(createLink(item));
+            } else if (isString(item)) {
+                if (converter) {
+                    output.push([field, converter]);
+                } else {
+                    output.push([field, "ref"]);
+                }
+            }
+        }
+    },
+};
