@@ -99,7 +99,8 @@
         "typescript": "^4.3.5",
         "cross-env": "^7.0.3",
         "modify-filepath": "^1.1.0",
-        "yyabuilder": "^1.1.4"
+        "yyabuilder": "^1.1.4",
+        "source-map-support": "^0.5.19"
     },
     "bugs": {
         "url": "https://github.com/yuyaryshev/ypg_runtime/issues"
