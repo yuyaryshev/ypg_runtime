@@ -587,28 +587,51 @@ export type ComposeOptions = {
     beautifySequence?: BeautyRule[];
 };
 
-const quote = ["'", '"', "`"];
-const pairStart = ["(", "[", "{"];
-const pairEnd = [")", "]", "}"];
-const whitespace = [" ", "\n", "\t", "\r"];
-const special = ["+", "-", "*", "/", "|"];
-const comma = ",";
-
-const isIdValid = (c: string) => ("a" <= c && c <= "z") || ("A" <= c && c <= "Z") || ("0" <= c && c <= "9") || c === "_";
-
 const charIs = (char: string) =>
-    (whitespace.includes(char) && "W") ||
-    (quote.includes(char) && "Q") ||
-    (pairStart.includes(char) && "PS") ||
-    (pairEnd.includes(char) && "PE") ||
-    (special.includes(char) && "L") ||
-    (isIdValid(char) && "I") ||
-    "S";
+    (/[\s]/.test(char) && "Space") ||
+    (/['"`]/.test(char) && "Quote") ||
+    (/[(\[{]/.test(char) && "PStart") ||
+    (/[}\])]/.test(char) && "PEnd") ||
+    (/[+\-*&^%$#@!/|:?<>=]/.test(char) && "Special") ||
+    (/[a-zA-Z_]/.test(char) && "Letter") ||
+    (/[0-9]/.test(char) && "Digit") ||
+    (char === "," && "Comma") ||
+    "";
 
-export type BeautyLabel = "W" | "Q" | "PS" | "PE" | "L" | "I" | "S";
+export type BeautyLabel = "Space" | "Quote" | "PStart" | "PEnd" | "Special" | "Letter" | "Digit" | "Comma";
 export type BeautyRule = `${BeautyLabel}-${BeautyLabel}`;
 
-const defaultBeautifySequence: BeautyRule[] = ["I-I", "Q-Q", "PS-PE", "Q-I", "I-Q", "PS-Q", "Q-PE"];
+/**
+ * "_a, "_0, "_", "_(,
+ * *_0, *_a, *_+, *_(,
+ * a_0, a_a, a_",
+ * 0_0, 0_a, 0_*,
+ * ,_a, ,_0,
+ */
+const defaultBeautifySequence: BeautyRule[] = [
+    "Quote-Letter",
+    "Quote-Quote",
+    "Quote-Digit",
+    "Quote-PStart",
+    "Special-Digit",
+    "Special-Letter",
+    "Special-Special",
+    "Special-PStart",
+    "Letter-Digit",
+    "Letter-Letter",
+    "Letter-Quote",
+    "Letter-Special",
+    "Letter-PStart",
+    "Digit-Digit",
+    "Digit-Letter",
+    "Digit-Special",
+    "Digit-PStart",
+    "PEnd-Digit",
+    "PEnd-Letter",
+    "PEnd-PStart",
+    "Comma-Letter",
+    "Comma-Digit",
+];
 
 function beautify(context: Context, item: string) {
     const bs = context.beautifySequence || defaultBeautifySequence;
@@ -616,13 +639,13 @@ function beautify(context: Context, item: string) {
         context.string = "";
     }
 
-    const res = item + "";
-    const after = charIs(context.string[context.string.length - 1]);
-    const before = charIs(res[0]);
+    const res = item;
+    const before = charIs(context.string[context.string.length - 1]);
+    const after = charIs(res[0]);
 
     const sequence = `${before}-${after}` as BeautyRule;
 
-    if (bs.includes(sequence)) {
+    if (context.string.length > 0 && bs.includes(sequence)) {
         context.string += " ";
     }
 
@@ -686,7 +709,7 @@ export function link(node: Node, context: Context, parent: Link) {
                 beautify(context, parent[item[0]] + "");
             }
         } else if (typeof item === "object" && !Array.isArray(item)) {
-            if (isIndent(item) && item.indent > 0) {
+            if (isIndent(item)) {
                 indent = item.indent;
             }
             if (isLink(item)) {
@@ -695,7 +718,7 @@ export function link(node: Node, context: Context, parent: Link) {
                 if (next) {
                     context = link(next, context, item);
                 } else {
-                    if (item.v) {
+                    if (typeof item.v === "number" || typeof item.v === "string") {
                         beautify(context, item.v + "");
                     } else {
                         throw new ReferenceError(`Bad link: ${item.to}`);
@@ -805,7 +828,8 @@ export const GEN = {
     },
 
     typeSwitch(item: any, field: string, choice: string[], { writer, input, output, generator }: GeneratorContext) {
-        if (item) {
+        // if item is Literal and his value is zero
+        if (item || item === 0) {
             const type = item.t;
             if (isString(type) && choice.includes(type)) {
                 output.push(createLink(item));
