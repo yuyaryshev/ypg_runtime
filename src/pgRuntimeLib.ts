@@ -535,32 +535,341 @@ export interface GenResultLinkerContext {
     compileLink?: (path: string, context: GenResultLinkerContext, params?: any | undefined) => void;
 }
 
-export function linkGenResultRecursive(genResult: GenResult, context: GenResultLinkerContext, params?: any | undefined) {
-    for (const item of genResult.items) {
-        if (isGenResultItemString(item)) {
-            context.s += item;
-        } else if (isGenResultItemParam(item)) {
-            context.s += params?.[item[0]];
-        } else if (isGenResultItemLink(item)) {
-            if (context.compileLink) {
-                context.compileLink(item.t, context, item);
-            } else if (context.lookup) {
-                const subGenResult = context.lookup(item.t);
-                linkGenResultRecursive(subGenResult, context, item);
-            } else {
-                throw new Error(`CODE00000002 Eather lookup or compileLink funciton should be specified!`);
-            }
-        } else {
-            const e = new Error(`CODE00000001 Invalid GenResultItem`);
-            (e as any).genResult = genResult;
-            (e as any).item = item;
-            throw e;
-        }
+export type ID = string | number;
+export type Link = {
+    to: ID;
+    [key: string]: string | number;
+};
+
+export type Indent = {
+    indent: number;
+};
+export type Node = {
+    id: ID;
+    items: Array<string | string[] | Link | Indent>;
+};
+
+export type Leaf = {
+    [key: string]: string | number | string[] | Leaf | Leaf[];
+};
+
+export type Writer = {
+    id: ID;
+    leaf: Leaf;
+};
+
+export type Store = Map<ID, Node>;
+export type Handlers = {
+    [key: string]: (writer: Writer) => Node;
+};
+
+export type Enum = {
+    [key: string]: string[];
+};
+
+export type Converters = "String" | "Int" | "Float" | "Indentifier";
+
+export type Context = {
+    string: string;
+    lookup: (id: ID) => Node | undefined;
+    converted: {
+        [key: string]: Converters;
+    };
+    beautifySequence?: BeautyRule[];
+};
+
+export type ComposeOptions = {
+    exclude?: string[];
+    converters?: Context["converted"];
+    beautifySequence?: BeautyRule[];
+};
+
+const charIs = (char: string) =>
+    (/[\s]/.test(char) && "Space") ||
+    (/['"`]/.test(char) && "Quote") ||
+    (/[(\[{]/.test(char) && "PStart") ||
+    (/[}\])]/.test(char) && "PEnd") ||
+    (/[+\-*&^%$#@!/|:?<>=]/.test(char) && "Special") ||
+    (/[a-zA-Z_]/.test(char) && "Letter") ||
+    (/[0-9]/.test(char) && "Digit") ||
+    (char === "," && "Comma") ||
+    "";
+
+export type BeautyLabel = "Space" | "Quote" | "PStart" | "PEnd" | "Special" | "Letter" | "Digit" | "Comma";
+export type BeautyRule = `${BeautyLabel}-${BeautyLabel}`;
+
+/**
+ * "_a, "_0, "_", "_(,
+ * *_0, *_a, *_+, *_(,
+ * a_0, a_a, a_",
+ * 0_0, 0_a, 0_*,
+ * ,_a, ,_0,
+ */
+const defaultBeautifySequence: BeautyRule[] = [
+    "Quote-Letter",
+    "Quote-Quote",
+    "Quote-Digit",
+    "Quote-PStart",
+    "Special-Digit",
+    "Special-Letter",
+    "Special-Special",
+    "Special-PStart",
+    "Letter-Digit",
+    "Letter-Letter",
+    "Letter-Quote",
+    "Letter-Special",
+    "Letter-PStart",
+    "Digit-Digit",
+    "Digit-Letter",
+    "Digit-Special",
+    "Digit-PStart",
+    "PEnd-Digit",
+    "PEnd-Letter",
+    "PEnd-PStart",
+    "Comma-Letter",
+    "Comma-Digit",
+];
+
+function beautify(context: Context, item: string) {
+    const bs = context.beautifySequence || defaultBeautifySequence;
+    if (context.string === undefined) {
+        context.string = "";
+    }
+
+    const res = item;
+    const before = charIs(context.string[context.string.length - 1]);
+    const after = charIs(res[0]);
+
+    const sequence = `${before}-${after}` as BeautyRule;
+
+    if (context.string.length > 0 && bs.includes(sequence)) {
+        context.string += " ";
+    }
+
+    return (context.string += res);
+}
+
+const isLink = (target: any): target is Link => !!target.to;
+
+const isIndent = (target: any): target is Indent => !!target.indent;
+
+export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions) {
+    const cleaned = clear(ast, options?.exclude || ["raw", "tokens"]);
+    const generated = generate(cleaned, generator);
+    const node = generated.values().next().value;
+
+    if (node) {
+        const linked = link(
+            node,
+            {
+                string: "",
+                lookup: (id) => generated.get(id),
+                converted: options?.converters || {
+                    string: "String",
+                    number: "Float",
+                },
+                beautifySequence: options?.beautifySequence || defaultBeautifySequence,
+            },
+            { to: 0 },
+        );
+
+        return {
+            text: linked.string,
+            store: generated,
+        };
+    } else {
+        throw new ReferenceError(`Generated collection got no roots`);
     }
 }
 
-export function linkGenResult(genResult: GenResult, lookup: GenResultLookupFunc, params?: any | undefined): string {
-    const context = { s: "", lookup };
-    linkGenResultRecursive(genResult, context, params);
-    return context.s;
+export const converters: { [key: string]: Function } = {
+    String: (item: string) => `"${item}"`,
+    Identifier: (item: string) => item,
+    Float: (item: string) => parseFloat(item),
+    Int: (item: string) => parseInt(item, 10),
+};
+
+export function link(node: Node, context: Context, parent: Link) {
+    let indent = 0;
+
+    for (const item of node.items) {
+        if (typeof item === "string") {
+            beautify(context, item);
+        } else if (Array.isArray(item) && item.length) {
+            let converter = converters[item[1]];
+            if (!converter) {
+                converter = converters[context.converted[item[1]]];
+            }
+            if (converter) {
+                beautify(context, converter(parent[item[0]]));
+            } else {
+                beautify(context, parent[item[0]] + "");
+            }
+        } else if (typeof item === "object" && !Array.isArray(item)) {
+            if (isIndent(item)) {
+                indent = item.indent;
+            }
+            if (isLink(item)) {
+                const next = context.lookup(item.to);
+                context.string += " ".repeat(indent);
+                if (next) {
+                    context = link(next, context, item);
+                } else {
+                    if (typeof item.v === "number" || typeof item.v === "string") {
+                        beautify(context, item.v + "");
+                    } else {
+                        throw new ReferenceError(`Bad link: ${item.to}`);
+                    }
+                }
+            }
+        }
+    }
+
+    return context;
 }
+
+export function generate(target: Leaf, handlers: Handlers, store = new Map<ID, Node>()): Store {
+    for (const [key, value] of Object.entries(target)) {
+        if (key === "id") {
+            if (target.t && typeof target.t === "string" && (typeof value === "string" || typeof value === "number")) {
+                const handler = handlers[target.t];
+                if (handler) {
+                    store.set(value, handler({ id: value, leaf: target }));
+                } else {
+                    console.log(target.t);
+                }
+            }
+        }
+        if (Array.isArray(value)) {
+            for (const leaf of value) {
+                if (typeof leaf !== "string") {
+                    store = generate(leaf, handlers, store);
+                }
+            }
+        }
+        if (typeof value === "object" && !Array.isArray(value)) {
+            store = generate(value, handlers, store);
+        }
+    }
+
+    return store;
+}
+
+export function clear(target: Leaf, keys: string[] = []) {
+    const cleaned = {} as Leaf;
+    for (const [key, value] of Object.entries<unknown>(target)) {
+        if (!keys.includes(key)) {
+            if (Array.isArray(value) && typeof value[0] !== "string") {
+                cleaned[key] = value.map((item) => clear(item, keys));
+            } else if (value && typeof value === "object" && value.toString() === "[object Object]") {
+                cleaned[key] = clear(value as Leaf, keys);
+            } else if (Array.isArray(value) && typeof value[0] === "string") {
+                cleaned[key] = value;
+            } else if (typeof value === "string" || typeof value === "number") {
+                cleaned[key] = value;
+            }
+        }
+    }
+
+    return cleaned;
+}
+
+export function createLink(item: Leaf) {
+    const link = {} as Link;
+    for (const [key, value] of Object.entries<any>(item)) {
+        if (typeof value === "string" || typeof value === "number") {
+            if (key === "t") {
+                continue;
+            }
+            if (key === "id") {
+                link.to = value;
+                continue;
+            }
+            link[key] = value;
+        }
+    }
+
+    return link;
+}
+
+export function isLeaf(item: any): item is Leaf {
+    return !!(typeof item === "object" && !Array.isArray(item));
+}
+
+export function isString(item: any): item is string {
+    return typeof item === "string";
+}
+
+export function isNumber(item: any): item is number {
+    return typeof item === "number";
+}
+
+export function isBoolean(item: any): item is boolean {
+    return typeof item === "boolean";
+}
+
+export function isPrimitive(item: any): item is string | number | boolean {
+    return !(isString(item) || isNumber(item) || isBoolean(item));
+}
+
+export type GeneratorContext = {
+    writer: Writer;
+    input: Leaf;
+    output: Node["items"];
+    generator: Handlers;
+};
+
+export const GEN = {
+    enumSwitch(flag: string, e: Enum, { output }: GeneratorContext) {
+        output.push(e[flag][0]);
+    },
+
+    typeSwitch(item: any, field: string, choice: string[], { writer, input, output, generator }: GeneratorContext) {
+        // if item is Literal and his value is zero
+        if (item || item === 0) {
+            const type = item.t;
+            if (isString(type) && choice.includes(type)) {
+                output.push(createLink(item));
+            } else if (isString(input.t)) {
+                output.push([field, input.t]);
+            }
+        } else {
+            const type = input.t;
+            if (isString(type) && choice.includes(type)) {
+                return generator[type](writer);
+            }
+        }
+    },
+
+    plusField(field: string | undefined, { input, output }: GeneratorContext, callback: (item: Leaf) => void, seporator?: () => void) {
+        if (field) {
+            const items = input[field];
+            if (Array.isArray(items) && items.length) {
+                for (const [i, item] of items.entries()) {
+                    if (isLeaf(item)) {
+                        callback(item);
+                    } else {
+                        output.push(item);
+                    }
+                    if (seporator && items.length > 1 && i < items.length - 1) {
+                        seporator();
+                    }
+                }
+            }
+        }
+    },
+
+    reference(item: any, field: string, converter: string, { input, output }: GeneratorContext) {
+        if (item) {
+            if (isLeaf(item)) {
+                output.push(createLink(item));
+            } else if (isString(item)) {
+                if (converter) {
+                    output.push([field, converter]);
+                } else {
+                    output.push([field, "ref"]);
+                }
+            }
+        }
+    },
+};
