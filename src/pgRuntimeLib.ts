@@ -500,28 +500,25 @@ export function isGenResultItemString(v: any): v is string {
     return typeof v === "string";
 }
 export function isGenResultItemParam(v: any): v is [string] {
-    return Array.isArray(v) && v.length === 1;
+    return Array.isArray(v) && 1 <= v.length && v.length <= 2;
 }
 
 export interface GenResultItemLink {
-    linkto: string;
+    t: string;
     [key: string]: string;
 }
 export function isGenResultItemLink(v: any): v is GenResultItemLink {
-    return !!v.linkto;
+    return !!v.t;
 }
 
 export type GenResultItemConv = string;
-export type GenResultItem<TParamKey extends string = string> =
-    | string
-    | ([TParamKey] | [TParamKey, string])
-    | { linkto: string; [key: string]: string };
+export type GenResultItem<TParamKey extends string = string> = string | ([TParamKey] | [TParamKey, string]) | { t: string; [key: string]: string };
 
 /**
  * GenResult - содержит в items массив из трех видов элементов
- * 'baz'                                - строки-константы
- * ['foo']                              - параметры. При линковке результатов генерации, вместо них будет поставлено значение соответствующее параметру
- * \{linkto:'axe.1', p1:"v1", p2:"v2"\}   - ссылки на другие результаты генерации. При линковке результатов генерации, вместо них подставляются другие результаты генерации
+ * 'baz'                                       - строки-константы
+ * ['foo','Conv']                              - параметры. Conv - имя функции конвертации для генератора. При линковке результатов генерации, вместо них будет поставлено значение соответствующее параметру
+ * \{t:'axe.1', p1:"v1", p2:"v2"\}        - ссылки на другие результаты генерации. При линковке результатов генерации, вместо них подставляются другие результаты генерации
  * Чтобы преобразовать GenResult в строку нужно вызвать linkGenResult
  **/
 export interface GenResult<TParamKey extends string = string> {
