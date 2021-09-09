@@ -499,6 +499,12 @@ export function newPgGenerator(params: NewPgGeneratorInput): PgGenerator {
 export function isGenResultItemString(v: any): v is string {
     return typeof v === "string";
 }
+
+export type GenResultParamKey = string;
+export type GenResultParamConv = string;
+
+export type GenResultParamItem = ([GenResultParamKey] | [GenResultParamKey, GenResultParamConv]);
+
 export function isGenResultItemParam(v: any): v is [string] {
     return Array.isArray(v) && 1 <= v.length && v.length <= 2;
 }
@@ -511,8 +517,16 @@ export function isGenResultItemLink(v: any): v is GenResultItemLink {
     return !!v.t;
 }
 
+
+export interface GenResultItemIndent {
+    indent:number;
+}
+export function isGenResultItemIndent(v: any): v is GenResultItemIndent {
+    return v.indent !== undefined;
+}
+
 export type GenResultItemConv = string;
-export type GenResultItem<TParamKey extends string = string> = string | ([TParamKey] | [TParamKey, string]) | { t: string; [key: string]: string };
+export type GenResultItem = string | GenResultParamItem | GenResultItemLink | GenResultItemIndent;
 
 /**
  * GenResult - содержит в items массив из трех видов элементов
@@ -521,9 +535,9 @@ export type GenResultItem<TParamKey extends string = string> = string | ([TParam
  * \{t:'axe.1', p1:"v1", p2:"v2"\}        - ссылки на другие результаты генерации. При линковке результатов генерации, вместо них подставляются другие результаты генерации
  * Чтобы преобразовать GenResult в строку нужно вызвать linkGenResult
  **/
-export interface GenResult<TParamKey extends string = string> {
+export interface GenResult {
     id: GenResultId;
-    items: GenResultItem<TParamKey>[];
+    items: GenResultItem[];
 }
 export type GenResultId = string | number;
 
@@ -544,6 +558,7 @@ export type Link = {
 export type Indent = {
     indent: number;
 };
+
 export type Node = {
     id: ID;
     items: Array<string | string[] | Link | Indent>;
