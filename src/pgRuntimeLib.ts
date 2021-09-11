@@ -496,86 +496,53 @@ export function newPgGenerator(params: NewPgGeneratorInput): PgGenerator {
 //======================================================================================================================
 //type TParamKey = "param1" | "param2" | "param3"; // - это список принимаемых параметров
 
-export function isGenResultItemString(v: any): v is string {
-    return typeof v === "string";
+export interface GenResult {
+    id: GenResultId;
+    items: GenResultItem[];
+}
+
+export type GenResultId = string | number;
+export type GenResultItem = string | GenResultItemLink | GenResultItemIndent;
+
+export interface GenResultItemLink {
+    type: string;
+    to: GenResultId;
+    fieldId: string;
+}
+export interface GenResultItemIndent {
+    indent: number;
 }
 
 export type GenResultParamKey = string;
-export type GenResultParamConv = string;
+export type GenResultLookupFunc = (path: string) => GenResult;
 
-export type GenResultParamItem = ([GenResultParamKey] | [GenResultParamKey, GenResultParamConv]);
-
-export function isGenResultItemParam(v: any): v is [string] {
-    return Array.isArray(v) && 1 <= v.length && v.length <= 2;
-}
-
-export interface GenResultItemLink {
-    t: string;
-    [key: string]: string;
+export function isGenResultItemString(v: any): v is string {
+    return typeof v === "string";
 }
 export function isGenResultItemLink(v: any): v is GenResultItemLink {
-    return !!v.t;
-}
-
-
-export interface GenResultItemIndent {
-    indent:number;
+    return !!v.to;
 }
 export function isGenResultItemIndent(v: any): v is GenResultItemIndent {
     return v.indent !== undefined;
 }
 
-export type GenResultItemConv = string;
-export type GenResultItem = string | GenResultParamItem | GenResultItemLink | GenResultItemIndent;
-
-/**
- * GenResult - содержит в items массив из трех видов элементов
- * 'baz'                                       - строки-константы
- * ['foo','Conv']                              - параметры. Conv - имя функции конвертации для генератора. При линковке результатов генерации, вместо них будет поставлено значение соответствующее параметру
- * \{t:'axe.1', p1:"v1", p2:"v2"\}        - ссылки на другие результаты генерации. При линковке результатов генерации, вместо них подставляются другие результаты генерации
- * Чтобы преобразовать GenResult в строку нужно вызвать linkGenResult
- **/
-export interface GenResult {
-    id: GenResultId;
-    items: GenResultItem[];
+export function optimizeGenResult(gr: GenResult): GenResult {
+    // TODO implement
+    return gr;
 }
-export type GenResultId = string | number;
-
-export type GenResultLookupFunc = (path: string) => GenResult;
-
-export interface GenResultLinkerContext {
-    s: string;
-    lookup?: GenResultLookupFunc;
-    compileLink?: (path: string, context: GenResultLinkerContext, params?: any | undefined) => void;
-}
-
-export type ID = string | number;
-export type Link = {
-    to: ID;
-    [key: string]: string | number;
-};
-
-export type Indent = {
-    indent: number;
-};
-
-export type Node = {
-    id: ID;
-    items: Array<string | string[] | Link | Indent>;
-};
 
 export type Leaf = {
     [key: string]: string | number | string[] | Leaf | Leaf[];
 };
 
 export type Writer = {
-    id: ID;
+    id: GenResultId;
     leaf: Leaf;
 };
 
-export type Store = Map<ID, Node>;
+export type Store = Map<GenResultId, GenResult>;
 export type Handlers = {
-    [key: string]: (writer: Writer) => Node;
+    [key: string]: (writer: Writer) => GenResult;
 };
 
 export type Enum = {
@@ -586,7 +553,7 @@ export type Converters = "String" | "Int" | "Float" | "Indentifier";
 
 export type Context = {
     string: string;
-    lookup: (id: ID) => Node | undefined;
+    lookup: (id: GenResultId) => GenResult | undefined;
     converted: {
         [key: string]: Converters;
     };
@@ -597,6 +564,13 @@ export type ComposeOptions = {
     exclude?: string[];
     converters?: Context["converted"];
     beautifySequence?: BeautyRule[];
+};
+
+export type GeneratorContext = {
+    writer: Writer;
+    input: Leaf;
+    output: GenResult["items"];
+    generator: Handlers;
 };
 
 const charIs = (char: string) =>
@@ -664,9 +638,9 @@ function beautify(context: Context, item: string) {
     return (context.string += res);
 }
 
-const isLink = (target: any): target is Link => !!target.to;
+const isLink = (target: any): target is GenResultItemLink => !!target.to;
 
-const isIndent = (target: any): target is Indent => !!target.indent;
+const isIndent = (target: any): target is GenResultItemIndent => !!target.indent;
 
 export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions) {
     const cleaned = clear(ast, options?.exclude || ["raw", "tokens"]);
@@ -685,7 +659,7 @@ export function compose(ast: Leaf, generator: Handlers, options?: ComposeOptions
                 },
                 beautifySequence: options?.beautifySequence || defaultBeautifySequence,
             },
-            { to: 0 },
+            { type: "Root", to: 0, fieldId: "genResult" },
         );
 
         return {
@@ -704,37 +678,24 @@ export const converters: { [key: string]: Function } = {
     Int: (item: string) => parseInt(item, 10),
 };
 
-export function link(node: Node, context: Context, parent: Link) {
+export function link(node: GenResult, context: Context, parent: GenResultItemLink) {
     let indent = 0;
 
     for (const item of node.items) {
-        if (typeof item === "string") {
+        if (isString(item)) {
             beautify(context, item);
-        } else if (Array.isArray(item) && item.length) {
-            let converter = converters[item[1]];
-            if (!converter) {
-                converter = converters[context.converted[item[1]]];
-            }
-            if (converter) {
-                beautify(context, converter(parent[item[0]]));
-            } else {
-                beautify(context, parent[item[0]] + "");
-            }
-        } else if (typeof item === "object" && !Array.isArray(item)) {
+        } else if (isLeaf(item)) {
             if (isIndent(item)) {
                 indent = item.indent;
             }
             if (isLink(item)) {
                 const next = context.lookup(item.to);
                 context.string += " ".repeat(indent);
+
                 if (next) {
                     context = link(next, context, item);
                 } else {
-                    if (typeof item.v === "number" || typeof item.v === "string") {
-                        beautify(context, item.v + "");
-                    } else {
-                        throw new ReferenceError(`Bad link: ${item.to}`);
-                    }
+                    throw new ReferenceError(`Bad link: ${item.to}`);
                 }
             }
         }
@@ -743,7 +704,7 @@ export function link(node: Node, context: Context, parent: Link) {
     return context;
 }
 
-export function generate(target: Leaf, handlers: Handlers, store = new Map<ID, Node>()): Store {
+export function generate(target: Leaf, handlers: Handlers, store = new Map<GenResultId, GenResult>()): Store {
     for (const [key, value] of Object.entries(target)) {
         if (key === "id") {
             if (target.t && typeof target.t === "string" && (typeof value === "string" || typeof value === "number")) {
@@ -790,101 +751,46 @@ export function clear(target: Leaf, keys: string[] = []) {
 }
 
 export function createLink(item: Leaf) {
-    const link = {} as Link;
-    for (const [key, value] of Object.entries<any>(item)) {
-        if (typeof value === "string" || typeof value === "number") {
-            if (key === "t") {
-                continue;
+    if (isPrimitive(item)) {
+        return item.toString();
+    }
+    return { type: item.t, to: item.id, fieldId: "genResult" } as GenResultItemLink;
+}
+
+export type PlusFieldContext = {
+    fieldName: string;
+    bodyCallback: (item: Leaf) => void;
+    separatorCallback?: () => void;
+};
+
+export function createPlusField({ fieldName, separatorCallback, bodyCallback }: PlusFieldContext, { input, output }: GeneratorContext) {
+    const items = input[fieldName];
+
+    if (items && isArray<Leaf>(items)) {
+        for (const [i, item] of items.entries()) {
+            bodyCallback(item);
+            if (separatorCallback && items.length > 1 && i < items.length - 1) {
+                separatorCallback();
             }
-            if (key === "id") {
-                link.to = value;
-                continue;
-            }
-            link[key] = value;
         }
     }
-
-    return link;
 }
 
 export function isLeaf(item: any): item is Leaf {
     return !!(typeof item === "object" && !Array.isArray(item));
 }
-
 export function isString(item: any): item is string {
     return typeof item === "string";
 }
-
 export function isNumber(item: any): item is number {
     return typeof item === "number";
 }
-
 export function isBoolean(item: any): item is boolean {
     return typeof item === "boolean";
 }
-
-export function isPrimitive(item: any): item is string | number | boolean {
-    return !(isString(item) || isNumber(item) || isBoolean(item));
+export function isArray<T>(item: any): item is Array<T> {
+    return Array.isArray(item);
 }
-
-export type GeneratorContext = {
-    writer: Writer;
-    input: Leaf;
-    output: Node["items"];
-    generator: Handlers;
-};
-
-export const GEN = {
-    enumSwitch(flag: string, e: Enum, { output }: GeneratorContext) {
-        output.push(e[flag][0]);
-    },
-
-    typeSwitch(item: any, field: string, choice: string[], { writer, input, output, generator }: GeneratorContext) {
-        // if item is Literal and his value is zero
-        if (item || item === 0) {
-            const type = item.t;
-            if (isString(type) && choice.includes(type)) {
-                output.push(createLink(item));
-            } else if (isString(input.t)) {
-                output.push([field, input.t]);
-            }
-        } else {
-            const type = input.t;
-            if (isString(type) && choice.includes(type)) {
-                return generator[type](writer);
-            }
-        }
-    },
-
-    plusField(field: string | undefined, { input, output }: GeneratorContext, callback: (item: Leaf) => void, seporator?: () => void) {
-        if (field) {
-            const items = input[field];
-            if (Array.isArray(items) && items.length) {
-                for (const [i, item] of items.entries()) {
-                    if (isLeaf(item)) {
-                        callback(item);
-                    } else {
-                        output.push(item);
-                    }
-                    if (seporator && items.length > 1 && i < items.length - 1) {
-                        seporator();
-                    }
-                }
-            }
-        }
-    },
-
-    reference(item: any, field: string, converter: string, { input, output }: GeneratorContext) {
-        if (item) {
-            if (isLeaf(item)) {
-                output.push(createLink(item));
-            } else if (isString(item)) {
-                if (converter) {
-                    output.push([field, converter]);
-                } else {
-                    output.push([field, "ref"]);
-                }
-            }
-        }
-    },
-};
+export function isPrimitive(item: any): item is string | number | boolean {
+    return !!(isString(item) || isNumber(item) || isBoolean(item));
+}
