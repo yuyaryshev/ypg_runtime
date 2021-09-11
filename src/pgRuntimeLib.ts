@@ -689,13 +689,15 @@ export function link(node: GenResult, context: Context, parent: GenResultItemLin
                 indent = item.indent;
             }
             if (isLink(item)) {
-                const next = context.lookup(item.to);
-                context.string += " ".repeat(indent);
+                if (item.fieldId === 'genResult') {
+                    const next = context.lookup(item.to);
+                    context.string += " ".repeat(indent);
 
-                if (next) {
-                    context = link(next, context, item);
-                } else {
-                    throw new ReferenceError(`Bad link: ${item.to}`);
+                    if (next) {
+                        context = link(next, context, item);
+                    } else {
+                        throw new ReferenceError(`Bad link: ${item.to}`);
+                    }
                 }
             }
         }
