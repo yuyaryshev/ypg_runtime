@@ -689,7 +689,7 @@ export function link(node: GenResult, context: Context, parent: GenResultItemLin
                 indent = item.indent;
             }
             if (isLink(item)) {
-                if (item.fieldId === 'genResult') {
+                if (item.fieldId === "genResult") {
                     const next = context.lookup(item.to);
                     context.string += " ".repeat(indent);
 
@@ -706,13 +706,22 @@ export function link(node: GenResult, context: Context, parent: GenResultItemLin
     return context;
 }
 
+export function isID(e: any):e is string | number {
+    return isString(e) || isNumber(e);
+}
+
 export function generate(target: Leaf, handlers: Handlers, store = new Map<GenResultId, GenResult>()): Store {
     for (const [key, value] of Object.entries(target)) {
         if (key === "id") {
-            if (target.t && typeof target.t === "string" && (typeof value === "string" || typeof value === "number")) {
+            if (target.t && typeof target.t === "string") {
                 const handler = handlers[target.t];
                 if (handler) {
-                    store.set(value, handler({ id: value, leaf: target }));
+                    if (isLeaf(value) && typeof value.value === "string") {
+                        store.set(value.value, handler({ id: value.value, leaf: target }));
+                        console.log(target)
+                    } else if (isID(value)) {
+                        store.set(value, handler({ id: value, leaf: target }));
+                    }
                 } else {
                     console.log(target.t);
                 }
@@ -756,6 +765,11 @@ export function createLink(item: Leaf) {
     if (isPrimitive(item)) {
         return item.toString();
     }
+
+    if (isLeaf(item.id)) {
+        return { type: item.t, to: item.id.value, fieldId: "genResult" } as GenResultItemLink;
+    }
+
     return { type: item.t, to: item.id, fieldId: "genResult" } as GenResultItemLink;
 }
 
