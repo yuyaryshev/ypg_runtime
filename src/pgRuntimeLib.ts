@@ -706,7 +706,7 @@ export function link(node: GenResult, context: Context, parent: GenResultItemLin
     return context;
 }
 
-export function isID(e: any):e is string | number {
+export function isID(e: any): e is string | number {
     return isString(e) || isNumber(e);
 }
 
@@ -718,7 +718,7 @@ export function generate(target: Leaf, handlers: Handlers, store = new Map<GenRe
                 if (handler) {
                     if (isLeaf(value) && typeof value.value === "string") {
                         store.set(value.value, handler({ id: value.value, leaf: target }));
-                        console.log(target)
+                        console.log(target);
                     } else if (isID(value)) {
                         store.set(value, handler({ id: value, leaf: target }));
                     }
