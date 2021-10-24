@@ -234,7 +234,7 @@ export function isToken<T = ITokenValueType>(token: any): token is ITokenLike<T>
 /**
  *
  */
-export function fillFieldSingle<T extends any>(o: any, fieldName: string, v0: T): T {
+export function fillFieldSingle<T>(o: any, fieldName: string, v0: T): T {
     if (v0 === undefined) return v0;
     const v = (v0 as any).v !== undefined ? (v0 as any).v : v0;
     o[fieldName] = v;
@@ -248,7 +248,7 @@ export function fillFieldSingle<T extends any>(o: any, fieldName: string, v0: T)
 /**
  *
  */
-export function fillFieldMulti<T extends any>(o: any, fieldName: string, v0: T): T {
+export function fillFieldMulti<T>(o: any, fieldName: string, v0: T): T {
     if (v0 === undefined) return v0;
     const v = (v0 as any).v !== undefined ? (v0 as any).v : v0;
 
